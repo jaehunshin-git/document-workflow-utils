@@ -17,15 +17,20 @@ concurrency:
 
 jobs:
   test:
-    name: Python ${{ matrix.python-version }}
-    runs-on: ubuntu-latest
+    name: ${{ matrix.os }} / Python ${{ matrix.python-version }}
+    runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
       matrix:
-        python-version:
-          - "3.11"
-          - "3.12"
-          - "3.13"
+        include:
+          - os: ubuntu-latest
+            python-version: "3.11"
+          - os: ubuntu-latest
+            python-version: "3.12"
+          - os: ubuntu-latest
+            python-version: "3.13"
+          - os: windows-latest
+            python-version: "3.13"
     steps:
       - name: 저장소 체크아웃
         # actions/checkout v7 메이저 태그의 최신 안정 릴리스(v7.0.1)를 커밋으로 고정합니다.
@@ -45,7 +50,10 @@ jobs:
         run: uv run pytest
 
       - name: 린트 실행
-        run: uv run ruff check src tests
+        run: uv run ruff check src tests scripts examples
 
       - name: 패키지 빌드
         run: uv build
+
+      - name: 배포물 독립 설치 및 명령행 스모크 검증
+        run: uv run --no-sync python scripts/verify_distribution.py dist
