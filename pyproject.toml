@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "document-workflow-utils"
-version = "0.1.0"
+version = "0.2.0"
 description = "파일 목록 비교와 디렉터리 분석을 위한 개인 Python 도구 모음"
 readme = "README.md"
 requires-python = ">=3.11"

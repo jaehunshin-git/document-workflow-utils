@@ -94,6 +94,19 @@ class CoreTest(unittest.TestCase):
         self.assertEqual(result.actual, ("a.txt",))
         self.assertTrue(result.matches)
 
+    def test_compare_ignores_matching_paths_and_directory_prefixes(self) -> None:
+        directory = self.root / "files"
+        self.write("files/keep.txt", "")
+        self.write("files/ignored/direct.txt", "")
+        self.write("files/cache/nested/value.txt", "")
+        expected = self.write("expected.txt", "keep.txt\nignored/direct.txt\ncache/nested/value.txt\n")
+
+        result = compare_file_names(expected, directory, ignore_patterns=("ignored", "cache/*"))
+
+        self.assertEqual(result.expected, ("keep.txt",))
+        self.assertEqual(result.actual, ("keep.txt",))
+        self.assertTrue(result.matches)
+
     def test_directory_report_formats_and_writes_both_reports(self) -> None:
         directory = self.root / "tree"
         self.write("tree/z.txt", "")
@@ -126,3 +139,13 @@ class CoreTest(unittest.TestCase):
         report = analyze_directory(directory)
 
         self.assertEqual([entry.path for entry in report.entries], ["visible.txt"])
+
+    def test_directory_report_ignores_paths_and_does_not_descend_into_ignored_directory(self) -> None:
+        directory = self.root / "tree"
+        self.write("tree/keep.txt", "")
+        self.write("tree/skip/hidden.txt", "")
+        self.write("tree/cache/deep/item.txt", "")
+
+        report = analyze_directory(directory, ignore_patterns=("skip", "cache/*"))
+
+        self.assertEqual([entry.path for entry in report.entries], ["keep.txt"])

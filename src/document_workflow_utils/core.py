@@ -6,6 +6,7 @@
 from __future__ import annotations
 
 import csv
+import fnmatch
 import re
 from dataclasses import dataclass
 from pathlib import Path
@@ -21,6 +22,23 @@ def _sort_key(path: Path | str) -> tuple[str, str]:
 
 def _read_lines(input_path: str | Path) -> list[str]:
     return Path(input_path).read_text(encoding="utf-8").splitlines()
+
+
+def _is_ignored(
+    relative_path: str, ignore_patterns: tuple[str, ...], is_directory: bool = False
+) -> bool:
+    """상대 POSIX 경로나 그 상위 디렉터리가 무시 패턴과 일치하는지 확인합니다."""
+    parts = relative_path.split("/")
+    prefixes = ["/".join(parts[:index]) for index in range(1, len(parts))]
+    candidates = [relative_path, *prefixes]
+    if is_directory:
+        candidates.append(f"{relative_path}/")
+    candidates.extend(f"{prefix}/" for prefix in prefixes)
+    return any(
+        fnmatch.fnmatchcase(candidate, pattern)
+        for candidate in candidates
+        for pattern in ignore_patterns
+    )
 
 
 @dataclass(frozen=True)
@@ -116,26 +134,52 @@ class FileComparison:
         return not self.missing and not self.unexpected
 
 
-def _relative_files(directory: str | Path) -> tuple[str, ...]:
+def _relative_files(
+    directory: str | Path, ignore_patterns: tuple[str, ...] = ()
+) -> tuple[str, ...]:
     root = Path(directory)
     if not root.is_dir():
         raise NotADirectoryError(f"비교할 디렉터리를 찾을 수 없습니다: {root}")
     files: list[str] = []
-    for path in root.rglob("*"):
-        if path.is_symlink() or not path.is_file() or path.name.casefold() == "desktop.ini":
-            continue
-        files.append(path.relative_to(root).as_posix())
+
+    def visit(current: Path) -> None:
+        children = sorted(
+            (
+                child
+                for child in current.iterdir()
+                if not child.is_symlink() and child.name.casefold() != "desktop.ini"
+            ),
+            key=lambda child: _sort_key(child.name),
+        )
+        for child in children:
+            relative = child.relative_to(root).as_posix()
+            if _is_ignored(relative, ignore_patterns, child.is_dir()):
+                continue
+            if child.is_dir():
+                visit(child)
+            elif child.is_file():
+                files.append(relative)
+
+    visit(root)
     return tuple(sorted(files, key=_sort_key))
 
 
-def compare_file_names(expected_path: str | Path, directory: str | Path) -> FileComparison:
+def compare_file_names(
+    expected_path: str | Path,
+    directory: str | Path,
+    ignore_patterns: tuple[str, ...] = (),
+) -> FileComparison:
     """기대 목록의 상대 파일명과 디렉터리의 실제 파일명을 비교합니다."""
     expected: set[str] = set()
     for line in _read_lines(expected_path):
         normalized = line.strip().replace("\\", "/")
-        if normalized and re.split(r"/+", normalized)[-1].casefold() != "desktop.ini":
+        if (
+            normalized
+            and re.split(r"/+", normalized)[-1].casefold() != "desktop.ini"
+            and not _is_ignored(normalized, ignore_patterns)
+        ):
             expected.add(normalized)
-    actual = set(_relative_files(directory))
+    actual = set(_relative_files(directory, ignore_patterns))
     ordered_expected = tuple(sorted(expected, key=_sort_key))
     ordered_actual = tuple(sorted(actual, key=_sort_key))
     return FileComparison(
@@ -172,7 +216,11 @@ class DirectoryReport:
         return sum(entry.is_directory for entry in self.entries)
 
 
-def analyze_directory(directory: str | Path, mode: str = "text") -> DirectoryReport:
+def analyze_directory(
+    directory: str | Path,
+    mode: str = "text",
+    ignore_patterns: tuple[str, ...] = (),
+) -> DirectoryReport:
     """`desktop.ini`를 제외한 재귀 구조를 주어진 모드와 함께 수집합니다."""
     if mode not in {"text", "emoji"}:
         raise ValueError("mode는 'text' 또는 'emoji'여야 합니다.")
@@ -192,6 +240,8 @@ def analyze_directory(directory: str | Path, mode: str = "text") -> DirectoryRep
         )
         for child in children:
             relative = child.relative_to(root).as_posix()
+            if _is_ignored(relative, ignore_patterns, child.is_dir()):
+                continue
             entry = DirectoryEntry(relative, child.is_dir(), len(child.relative_to(root).parts) - 1)
             entries.append(entry)
             if child.is_dir():
