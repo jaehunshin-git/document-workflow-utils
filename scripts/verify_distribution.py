@@ -118,6 +118,10 @@ def verify_sdist(sdist: Path) -> None:
 
 def main() -> None:
     """인자를 처리하고 검증을 실행합니다."""
+    for stream in (sys.stdout, sys.stderr):
+        reconfigure = getattr(stream, "reconfigure", None)
+        if reconfigure is not None:
+            reconfigure(encoding="utf-8")
     parser = argparse.ArgumentParser()
     parser.add_argument("distribution_directory", type=Path)
     args = parser.parse_args()
