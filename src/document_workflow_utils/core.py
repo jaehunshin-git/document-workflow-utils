@@ -6,8 +6,11 @@
 from __future__ import annotations
 
 import csv
+import re
 from dataclasses import dataclass
 from pathlib import Path
+
+MAX_NUMBER_SPAN = 1_000_000
 
 
 def _sort_key(path: Path | str) -> tuple[str, str]:
@@ -70,6 +73,11 @@ def analyze_numbers(input_path: str | Path) -> NumberAnalysis:
         return NumberAnalysis((), None, None, (), (), tuple(invalid_lines))
     minimum = min(values)
     maximum = max(values)
+    if maximum - minimum > MAX_NUMBER_SPAN:
+        raise ValueError(
+            f"분석할 정수 범위는 {MAX_NUMBER_SPAN:,} 이하여야 합니다: "
+            f"{minimum} ~ {maximum}"
+        )
     counts: dict[int, int] = {}
     for value in values:
         counts[value] = counts.get(value, 0) + 1
@@ -112,21 +120,21 @@ def _relative_files(directory: str | Path) -> tuple[str, ...]:
     root = Path(directory)
     if not root.is_dir():
         raise NotADirectoryError(f"비교할 디렉터리를 찾을 수 없습니다: {root}")
-    files = [
-        path.relative_to(root).as_posix()
-        for path in root.rglob("*")
-        if path.is_file() and path.name.casefold() != "desktop.ini"
-    ]
+    files: list[str] = []
+    for path in root.rglob("*"):
+        if path.is_symlink() or not path.is_file() or path.name.casefold() == "desktop.ini":
+            continue
+        files.append(path.relative_to(root).as_posix())
     return tuple(sorted(files, key=_sort_key))
 
 
 def compare_file_names(expected_path: str | Path, directory: str | Path) -> FileComparison:
     """기대 목록의 상대 파일명과 디렉터리의 실제 파일명을 비교합니다."""
-    expected = {
-        line.strip().replace("\\", "/")
-        for line in _read_lines(expected_path)
-        if line.strip() and Path(line.strip()).name.casefold() != "desktop.ini"
-    }
+    expected: set[str] = set()
+    for line in _read_lines(expected_path):
+        normalized = line.strip().replace("\\", "/")
+        if normalized and re.split(r"/+", normalized)[-1].casefold() != "desktop.ini":
+            expected.add(normalized)
     actual = set(_relative_files(directory))
     ordered_expected = tuple(sorted(expected, key=_sort_key))
     ordered_actual = tuple(sorted(actual, key=_sort_key))
@@ -175,7 +183,11 @@ def analyze_directory(directory: str | Path, mode: str = "text") -> DirectoryRep
 
     def visit(current: Path) -> None:
         children = sorted(
-            (child for child in current.iterdir() if child.name.casefold() != "desktop.ini"),
+            (
+                child
+                for child in current.iterdir()
+                if not child.is_symlink() and child.name.casefold() != "desktop.ini"
+            ),
             key=lambda child: _sort_key(child.name),
         )
         for child in children:

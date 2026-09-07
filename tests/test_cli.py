@@ -51,6 +51,15 @@ class CliTest(unittest.TestCase):
 
         self.assertEqual(status, 1)
 
+    def test_numbers_returns_two_when_range_is_too_wide(self) -> None:
+        source = self.write("numbers.txt", "-1000000000000\n1000000000000\n")
+
+        status, stdout, stderr = self.run_command(["numbers", str(source)])
+
+        self.assertEqual(status, 2)
+        self.assertEqual(stdout, "")
+        self.assertIn("정수 범위", stderr)
+
     def test_duplicates_writes_to_stdout(self) -> None:
         source = self.write("names.txt", "a\na\nb\n")
 

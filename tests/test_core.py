@@ -56,6 +56,12 @@ class CoreTest(unittest.TestCase):
         self.assertEqual(result.duplicates, ())
         self.assertEqual(result.invalid_lines, ())
 
+    def test_number_span_is_limited(self) -> None:
+        source = self.write("numbers.txt", "-1000000000000\n1000000000000\n")
+
+        with self.assertRaisesRegex(ValueError, "정수 범위"):
+            analyze_numbers(source)
+
     def test_duplicate_names_returns_only_repeated_names_in_stable_order(self) -> None:
         result = duplicate_names(self.write("names.txt", "B\na\nB\n\na\na\n"))
 
@@ -74,6 +80,19 @@ class CoreTest(unittest.TestCase):
         self.assertEqual(result.missing, ("missing.txt",))
         self.assertEqual(result.unexpected, ())
         self.assertFalse(result.matches)
+
+    def test_compare_excludes_windows_style_desktop_ini_and_symlinks(self) -> None:
+        directory = self.root / "files"
+        self.write("files/a.txt", "")
+        self.write("outside.txt", "")
+        (directory / "external-link").symlink_to(self.root / "outside.txt")
+        expected = self.write("expected.txt", "a.txt\nsub\\desktop.ini\n")
+
+        result = compare_file_names(expected, directory)
+
+        self.assertEqual(result.expected, ("a.txt",))
+        self.assertEqual(result.actual, ("a.txt",))
+        self.assertTrue(result.matches)
 
     def test_directory_report_formats_and_writes_both_reports(self) -> None:
         directory = self.root / "tree"
@@ -97,3 +116,13 @@ class CoreTest(unittest.TestCase):
     def test_invalid_tree_mode_is_rejected(self) -> None:
         with self.assertRaises(ValueError):
             analyze_directory(self.root, "invalid")
+
+    def test_directory_report_skips_symbolic_links(self) -> None:
+        directory = self.root / "tree"
+        directory.mkdir()
+        (directory / "loop").symlink_to(directory, target_is_directory=True)
+        self.write("tree/visible.txt", "")
+
+        report = analyze_directory(directory)
+
+        self.assertEqual([entry.path for entry in report.entries], ["visible.txt"])
