@@ -5,11 +5,17 @@ from __future__ import annotations
 import contextlib
 import io
 import json
+import os
+import shutil
+import subprocess
+import sys
 import tempfile
 import unittest
 from pathlib import Path
 
 from document_workflow_utils.cli import main
+
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
 
 
 class CliTest(unittest.TestCase):
@@ -32,6 +38,24 @@ class CliTest(unittest.TestCase):
         with contextlib.redirect_stdout(stdout), contextlib.redirect_stderr(stderr):
             result = main(arguments)
         return result, stdout.getvalue(), stderr.getvalue()
+
+    def run_module(self, arguments: list[str]) -> subprocess.CompletedProcess[str]:
+        """현재 소스 트리를 사용해 모듈 CLI를 별도 프로세스에서 실행합니다."""
+        environment = os.environ.copy()
+        source_directory = str(PROJECT_ROOT / "src")
+        environment["PYTHONUTF8"] = "1"
+        environment["PYTHONPATH"] = os.pathsep.join(
+            filter(None, (source_directory, environment.get("PYTHONPATH")))
+        )
+        return subprocess.run(
+            [sys.executable, "-m", "document_workflow_utils", *arguments],
+            capture_output=True,
+            check=False,
+            cwd=PROJECT_ROOT,
+            env=environment,
+            text=True,
+            timeout=30,
+        )
 
     def test_numbers_prints_result_and_returns_zero_when_numbers_exist(self) -> None:
         source = self.write("numbers.txt", "10\n12\n12\nwrong\n")
@@ -76,7 +100,7 @@ class CliTest(unittest.TestCase):
             main(["--version"])
 
         self.assertEqual(captured.exception.code, 0)
-        self.assertEqual(stdout.getvalue(), "0.2.0\n")
+        self.assertEqual(stdout.getvalue(), "0.3.0\n")
 
     def test_json_output_uses_documented_schemas(self) -> None:
         numbers = self.write("numbers.txt", "1\n3\nwrong\n")
@@ -91,19 +115,29 @@ class CliTest(unittest.TestCase):
         self.assertEqual(
             json.loads(output),
             {
+                "command": "numbers",
                 "duplicates": [],
                 "invalid_count": 1,
                 "invalid_lines": [{"line": 3, "value": "wrong"}],
                 "maximum": 3,
                 "minimum": 1,
                 "missing": [2],
+                "schema_version": "1.0",
                 "valid_count": 2,
             },
         )
 
         status, output, _ = self.run_command(["duplicates", str(names), "--json"])
         self.assertEqual(status, 0)
-        self.assertEqual(json.loads(output), {"duplicate_count": 1, "duplicates": {"가": 2}})
+        self.assertEqual(
+            json.loads(output),
+            {
+                "command": "duplicates",
+                "duplicate_count": 1,
+                "duplicates": {"가": 2},
+                "schema_version": "1.0",
+            },
+        )
         self.assertIn('  "duplicate_count": 1', output)
 
         status, output, _ = self.run_command(["compare", str(expected), str(directory), "--json"])
@@ -112,9 +146,11 @@ class CliTest(unittest.TestCase):
             json.loads(output),
             {
                 "actual_count": 2,
+                "command": "compare",
                 "expected_count": 1,
                 "matches": False,
                 "missing": ["wanted.txt"],
+                "schema_version": "1.0",
                 "unexpected": ["actual.txt", "folder/file.txt"],
             },
         )
@@ -124,15 +160,18 @@ class CliTest(unittest.TestCase):
         self.assertEqual(
             json.loads(output),
             {
+                "command": "tree",
                 "directory_count": 1,
                 "entries": [
                     {"depth": 0, "path": "actual.txt", "type": "file"},
                     {"depth": 0, "path": "folder", "type": "directory"},
                     {"depth": 1, "path": "folder/file.txt", "type": "file"},
                 ],
+                "extension_counts": {".txt": 2},
                 "file_count": 2,
                 "mode": "text",
                 "root": "directory",
+                "schema_version": "1.0",
             },
         )
 
@@ -159,6 +198,16 @@ class CliTest(unittest.TestCase):
         self.assertEqual(status, 0)
         self.assertIn("actual.txt", output)
         self.assertIn("누락 파일 수: 0", output)
+
+    def test_compare_strict_returns_one_when_only_unexpected_files_exist(self) -> None:
+        directory = self.root / "directory"
+        self.write("directory/actual.txt")
+        expected = self.write("expected.txt", "")
+
+        status, output, _ = self.run_command(["compare", str(expected), str(directory), "--strict"])
+
+        self.assertEqual(status, 1)
+        self.assertIn("예기치 않은 파일 수: 1", output)
 
     def test_compare_and_tree_ignore_repeatable_patterns(self) -> None:
         directory = self.root / "directory"
@@ -209,6 +258,7 @@ class CliTest(unittest.TestCase):
         self.assertEqual(status, 0)
         self.assertIn("📁 folder", stdout)
         self.assertIn("요약: 디렉터리 1개, 파일 1개", stdout)
+        self.assertIn("확장자: .txt 1개", stdout)
 
         text_output = self.root / "reports" / "tree.txt"
         csv_output = self.root / "reports" / "tree.csv"
@@ -216,14 +266,15 @@ class CliTest(unittest.TestCase):
             ["tree", str(directory), "--output", str(text_output), "--csv-output", str(csv_output)]
         )
         self.assertEqual(status, 0)
-        self.assertEqual(stdout, "요약: 디렉터리 1개, 파일 1개\n")
+        self.assertEqual(stdout, "요약: 디렉터리 1개, 파일 1개\n확장자: .txt 1개\n")
         self.assertTrue(text_output.exists())
         self.assertTrue(csv_output.exists())
 
     def test_argparse_errors_use_exit_code_two(self) -> None:
-        with self.assertRaises(SystemExit) as captured:
+        with self.assertRaises(SystemExit) as captured, contextlib.redirect_stderr(io.StringIO()) as stderr:
             main(["tree"])
         self.assertEqual(captured.exception.code, 2)
+        self.assertIn("the following arguments are required", stderr.getvalue())
 
     def test_operating_system_error_is_printed_to_stderr_with_exit_code_two(self) -> None:
         missing = self.root / "does-not-exist"
@@ -234,12 +285,77 @@ class CliTest(unittest.TestCase):
         self.assertEqual(stdout, "")
         self.assertIn("오류:", stderr)
 
-    def test_invalid_mode_is_printed_to_stderr_with_exit_code_two(self) -> None:
+    def test_invalid_mode_is_rejected_by_argparse_with_exit_code_two(self) -> None:
         directory = self.root / "directory"
         directory.mkdir()
 
-        status, stdout, stderr = self.run_command(["tree", str(directory), "--mode", "wrong"])
+        with (
+            self.assertRaises(SystemExit) as captured,
+            contextlib.redirect_stdout(io.StringIO()) as stdout,
+            contextlib.redirect_stderr(io.StringIO()) as stderr,
+        ):
+            main(["tree", str(directory), "--mode", "wrong"])
 
-        self.assertEqual(status, 2)
-        self.assertEqual(stdout, "")
-        self.assertIn("오류: mode는 'text' 또는 'emoji'여야 합니다.", stderr)
+        self.assertEqual(captured.exception.code, 2)
+        self.assertEqual(stdout.getvalue(), "")
+        self.assertIn("invalid choice", stderr.getvalue())
+        self.assertIn("text", stderr.getvalue())
+        self.assertIn("emoji", stderr.getvalue())
+
+    def test_help_lists_strict_and_mode_choices(self) -> None:
+        with (
+            self.assertRaises(SystemExit) as captured,
+            contextlib.redirect_stdout(io.StringIO()) as stdout,
+        ):
+            main(["tree", "--help"])
+
+        self.assertEqual(captured.exception.code, 0)
+        self.assertIn("--mode {text,emoji}", stdout.getvalue())
+        self.assertIn("트리 출력 형식", stdout.getvalue())
+
+        with (
+            self.assertRaises(SystemExit) as captured,
+            contextlib.redirect_stdout(io.StringIO()) as stdout,
+        ):
+            main(["compare", "--help"])
+
+        self.assertEqual(captured.exception.code, 0)
+        self.assertIn("--strict", stdout.getvalue())
+
+    def test_module_cli_uses_current_source_and_json_contract(self) -> None:
+        source = self.write("numbers.txt", "1\n3\n")
+
+        version = self.run_module(["--version"])
+        result = self.run_module(["numbers", str(source), "--json"])
+
+        self.assertEqual(version.returncode, 0)
+        self.assertEqual(version.stdout, "0.3.0\n")
+        self.assertEqual(version.stderr, "")
+        self.assertEqual(result.returncode, 0)
+        self.assertEqual(json.loads(result.stdout)["command"], "numbers")
+        self.assertEqual(json.loads(result.stdout)["schema_version"], "1.0")
+
+    def test_script_entrypoint_uses_current_source_when_available(self) -> None:
+        entrypoint = shutil.which("doc-utils")
+        if entrypoint is None:
+            self.skipTest("현재 환경에 doc-utils 엔트리포인트가 없습니다.")
+
+        environment = os.environ.copy()
+        source_directory = str(PROJECT_ROOT / "src")
+        environment["PYTHONUTF8"] = "1"
+        environment["PYTHONPATH"] = os.pathsep.join(
+            filter(None, (source_directory, environment.get("PYTHONPATH")))
+        )
+        result = subprocess.run(
+            [entrypoint, "--version"],
+            capture_output=True,
+            check=False,
+            cwd=PROJECT_ROOT,
+            env=environment,
+            text=True,
+            timeout=30,
+        )
+
+        self.assertEqual(result.returncode, 0)
+        self.assertEqual(result.stdout, "0.3.0\n")
+        self.assertEqual(result.stderr, "")

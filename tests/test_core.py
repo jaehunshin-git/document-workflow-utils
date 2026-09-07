@@ -85,7 +85,10 @@ class CoreTest(unittest.TestCase):
         directory = self.root / "files"
         self.write("files/a.txt", "")
         self.write("outside.txt", "")
-        (directory / "external-link").symlink_to(self.root / "outside.txt")
+        try:
+            (directory / "external-link").symlink_to(self.root / "outside.txt")
+        except OSError as error:
+            self.skipTest(f"현재 환경에서 심볼릭 링크를 만들 수 없습니다: {error}")
         expected = self.write("expected.txt", "a.txt\nsub\\desktop.ini\n")
 
         result = compare_file_names(expected, directory)
@@ -93,6 +96,37 @@ class CoreTest(unittest.TestCase):
         self.assertEqual(result.expected, ("a.txt",))
         self.assertEqual(result.actual, ("a.txt",))
         self.assertTrue(result.matches)
+
+    def test_compare_normalizes_expected_posix_relative_paths(self) -> None:
+        directory = self.root / "files"
+        self.write("files/a.txt", "")
+        self.write("files/sub/nested/b.txt", "")
+        expected = self.write(
+            "expected.txt",
+            "./a.txt\nsub\\nested//./b.txt\n./\n.\n\n",
+        )
+
+        result = compare_file_names(expected, directory)
+
+        self.assertEqual(result.expected, ("a.txt", "sub/nested/b.txt"))
+        self.assertEqual(result.actual, ("a.txt", "sub/nested/b.txt"))
+        self.assertTrue(result.matches)
+
+    def test_compare_rejects_absolute_and_parent_expected_paths(self) -> None:
+        directory = self.root / "files"
+        self.write("files/a.txt", "")
+
+        for invalid_path in (
+            "/tmp/a.txt",
+            r"C:\\tmp\\a.txt",
+            "C:drive-relative.txt",
+            "sub/../a.txt",
+            "../a.txt",
+        ):
+            with self.subTest(invalid_path=invalid_path):
+                expected = self.write("expected.txt", f"{invalid_path}\n")
+                with self.assertRaises(ValueError):
+                    compare_file_names(expected, directory)
 
     def test_compare_ignores_matching_paths_and_directory_prefixes(self) -> None:
         directory = self.root / "files"
@@ -126,6 +160,24 @@ class CoreTest(unittest.TestCase):
         with csv_output.open(encoding="utf-8", newline="") as file:
             self.assertEqual(list(csv.reader(file)), [["이름", "상위_경로"], ["x.txt", "alpha"], ["z.txt", ""]])
 
+    def test_directory_report_counts_extensions_with_documented_rules(self) -> None:
+        directory = self.root / "tree"
+        self.write("tree/README", "")
+        self.write("tree/.env", "")
+        self.write("tree/.config.JSON", "")
+        self.write("tree/archive.tar.GZ", "")
+        self.write("tree/report.TXT", "")
+        self.write("tree/another.txt", "")
+        self.write("tree/final.", "")
+
+        report = analyze_directory(directory)
+
+        self.assertEqual(
+            report.extension_counts,
+            {"": 3, ".gz": 1, ".json": 1, ".txt": 2},
+        )
+        self.assertEqual(tuple(report.extension_counts), ("", ".gz", ".json", ".txt"))
+
     def test_invalid_tree_mode_is_rejected(self) -> None:
         with self.assertRaises(ValueError):
             analyze_directory(self.root, "invalid")
@@ -133,7 +185,10 @@ class CoreTest(unittest.TestCase):
     def test_directory_report_skips_symbolic_links(self) -> None:
         directory = self.root / "tree"
         directory.mkdir()
-        (directory / "loop").symlink_to(directory, target_is_directory=True)
+        try:
+            (directory / "loop").symlink_to(directory, target_is_directory=True)
+        except OSError as error:
+            self.skipTest(f"현재 환경에서 심볼릭 링크를 만들 수 없습니다: {error}")
         self.write("tree/visible.txt", "")
 
         report = analyze_directory(directory)

@@ -7,7 +7,6 @@ from __future__ import annotations
 
 import csv
 import fnmatch
-import re
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -39,6 +38,31 @@ def _is_ignored(
         for candidate in candidates
         for pattern in ignore_patterns
     )
+
+
+def _normalize_expected_relative_path(value: str) -> str | None:
+    """기대 목록의 경로를 비교 가능한 POSIX 상대 경로로 정규화합니다.
+
+    빈 값과 현재 디렉터리를 가리키는 값은 무시합니다. 백슬래시는 POSIX 구분자로
+    바꾸고, 중복 구분자와 ``.`` 구성 요소는 제거합니다. 절대 경로와 ``..`` 구성
+    요소는 기대 목록이 비교 루트 밖을 가리키지 않도록 거부합니다.
+    """
+    normalized = value.strip().replace("\\", "/")
+    if not normalized:
+        return None
+    if normalized.startswith("/") or (
+        len(normalized) >= 2 and normalized[0].isalpha() and normalized[1] == ":"
+    ):
+        raise ValueError(f"기대 파일명은 상대 경로여야 합니다: {value!r}")
+
+    parts: list[str] = []
+    for part in normalized.split("/"):
+        if not part or part == ".":
+            continue
+        if part == "..":
+            raise ValueError(f"기대 파일명에 상위 경로를 사용할 수 없습니다: {value!r}")
+        parts.append(part)
+    return "/".join(parts) or None
 
 
 @dataclass(frozen=True)
@@ -172,10 +196,10 @@ def compare_file_names(
     """기대 목록의 상대 파일명과 디렉터리의 실제 파일명을 비교합니다."""
     expected: set[str] = set()
     for line in _read_lines(expected_path):
-        normalized = line.strip().replace("\\", "/")
+        normalized = _normalize_expected_relative_path(line)
         if (
             normalized
-            and re.split(r"/+", normalized)[-1].casefold() != "desktop.ini"
+            and normalized.rsplit("/", maxsplit=1)[-1].casefold() != "desktop.ini"
             and not _is_ignored(normalized, ignore_patterns)
         ):
             expected.add(normalized)
@@ -214,6 +238,26 @@ class DirectoryReport:
     @property
     def directory_count(self) -> int:
         return sum(entry.is_directory for entry in self.entries)
+
+    @property
+    def extension_counts(self) -> dict[str, int]:
+        """파일 확장자별 수를 정렬된 사전으로 반환합니다.
+
+        확장자는 마지막 점 뒤의 문자열(점을 포함)이며 대소문자를 구분하지 않습니다.
+        ``archive.tar.gz``는 ``.gz``로, ``.env``처럼 점으로만 시작하는 이름과
+        확장자가 없는 파일은 빈 문자열 키로 집계합니다. 반환 사전의 삽입 순서는
+        확장자 이름순으로 결정되어 동일한 보고서에서 항상 같습니다.
+        """
+        counts: dict[str, int] = {}
+        for entry in self.entries:
+            if entry.is_directory:
+                continue
+            extension = Path(entry.path).suffix.casefold()
+            counts[extension] = counts.get(extension, 0) + 1
+        return {
+            extension: counts[extension]
+            for extension in sorted(counts, key=_sort_key)
+        }
 
 
 def analyze_directory(

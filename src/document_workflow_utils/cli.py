@@ -18,6 +18,8 @@ from .core import (
     write_report,
 )
 
+JSON_SCHEMA_VERSION = "1.0"
+
 
 def build_parser() -> argparse.ArgumentParser:
     """명령행 인자 파서를 구성합니다."""
@@ -43,11 +45,22 @@ def build_parser() -> argparse.ArgumentParser:
         metavar="PATTERN",
         help="상대 경로 또는 디렉터리를 무시합니다. 반복해서 지정할 수 있습니다.",
     )
+    compare.add_argument(
+        "--strict",
+        action="store_true",
+        help="누락 파일뿐 아니라 예기치 않은 파일도 오류로 처리합니다.",
+    )
     compare.add_argument("--json", action="store_true", dest="as_json", help="결과를 JSON으로 출력합니다.")
 
     tree = commands.add_parser("tree", help="디렉터리 트리 보고서를 만듭니다.")
     tree.add_argument("directory", type=Path, metavar="DIRECTORY")
-    tree.add_argument("--mode", default="text", metavar="{text,emoji}")
+    tree.add_argument(
+        "--mode",
+        choices=("text", "emoji"),
+        default="text",
+        metavar="{text,emoji}",
+        help="트리 출력 형식입니다. 기본값은 text입니다.",
+    )
     tree.add_argument("--output", type=Path, metavar="PATH")
     tree.add_argument("--csv-output", type=Path, metavar="PATH")
     tree.add_argument(
@@ -61,9 +74,16 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
-def _print_json(value: object) -> None:
+def _print_json(command: str, value: dict[str, object]) -> None:
     """사람이 읽기 쉬운 정렬된 UTF-8 JSON을 표준 출력으로 보냅니다."""
-    print(json.dumps(value, ensure_ascii=False, sort_keys=True, indent=2))
+    print(
+        json.dumps(
+            {"schema_version": JSON_SCHEMA_VERSION, "command": command, **value},
+            ensure_ascii=False,
+            sort_keys=True,
+            indent=2,
+        )
+    )
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -74,6 +94,7 @@ def main(argv: list[str] | None = None) -> int:
             result = analyze_numbers(args.input)
             if args.as_json:
                 _print_json(
+                    args.command,
                     {
                         "duplicates": list(result.duplicates),
                         "invalid_count": result.invalid_count,
@@ -99,7 +120,7 @@ def main(argv: list[str] | None = None) -> int:
         if args.command == "duplicates":
             result = duplicate_names(args.input)
             if args.as_json:
-                _print_json({"duplicate_count": len(result), "duplicates": result})
+                _print_json(args.command, {"duplicate_count": len(result), "duplicates": result})
             else:
                 for name, count in result.items():
                     print(f"{name}\t{count}")
@@ -110,6 +131,7 @@ def main(argv: list[str] | None = None) -> int:
             result = compare_file_names(args.expected, args.directory, tuple(args.ignore))
             if args.as_json:
                 _print_json(
+                    args.command,
                     {
                         "actual_count": len(result.actual),
                         "expected_count": len(result.expected),
@@ -129,13 +151,14 @@ def main(argv: list[str] | None = None) -> int:
                 print("예기치 않은 파일:")
                 for name in result.unexpected:
                     print(name)
-            return 1 if result.missing else 0
+            return 1 if result.missing or (args.strict and result.unexpected) else 0
 
         report = analyze_directory(args.directory, args.mode, tuple(args.ignore))
         if args.output:
             write_report(report, args.output)
         if args.as_json:
             _print_json(
+                args.command,
                 {
                     "directory_count": report.directory_count,
                     "entries": [
@@ -147,14 +170,20 @@ def main(argv: list[str] | None = None) -> int:
                         for entry in report.entries
                     ],
                     "file_count": report.file_count,
+                    "extension_counts": dict(report.extension_counts),
                     "mode": report.mode,
-                    "root": report.root.name or report.root.anchor,
+                    "root": report.root.resolve().name or report.root.anchor,
                 }
             )
         else:
             if not args.output:
                 sys.stdout.write(format_report(report))
             print(f"요약: 디렉터리 {report.directory_count}개, 파일 {report.file_count}개")
+            extension_summary = ", ".join(
+                f"{extension or '[확장자 없음]'} {count}개"
+                for extension, count in report.extension_counts.items()
+            )
+            print(f"확장자: {extension_summary or '없음'}")
         if args.csv_output:
             write_parent_report(report, args.csv_output)
         return 0
