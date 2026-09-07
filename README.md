@@ -1,6 +1,9 @@
 # document-workflow-utils
 
 [![CI](https://github.com/jaehunshin-git/document-workflow-utils/actions/workflows/ci.yml/badge.svg)](https://github.com/jaehunshin-git/document-workflow-utils/actions/workflows/ci.yml)
+[![Release](https://img.shields.io/github/v/release/jaehunshin-git/document-workflow-utils)](https://github.com/jaehunshin-git/document-workflow-utils/releases)
+[![Python](https://img.shields.io/badge/Python-3.11--3.13-3776AB?logo=python&logoColor=white)](https://www.python.org/)
+[![Coverage](https://img.shields.io/badge/coverage-%E2%89%A590%25-brightgreen)](pyproject.toml)
 
 > 흩어진 파일 목록의 누락·중복·구조를 한 번에 검증하는 무의존성 Python CLI
 
@@ -16,8 +19,10 @@
 | `duplicates` | 텍스트 목록의 중복 항목과 등장 횟수를 결정적 순서로 집계합니다. |
 | `compare` | 기대 파일과 실제 디렉터리를 재귀 비교하고 누락·추가 항목을 보고합니다. |
 | `tree` | 디렉터리 구조를 text/emoji 트리와 부모 경로 CSV로 표현합니다. |
-| JSON 출력 | 모든 명령 결과를 후속 자동화가 소비할 수 있는 구조로 제공합니다. |
+| 확장자 통계 | 디렉터리의 파일을 정규화된 확장자별로 집계합니다. |
+| JSON 출력 | 버전이 명시된 계약으로 모든 명령 결과를 후속 자동화에 제공합니다. |
 | Ignore 패턴 | 임시 파일과 불필요한 경로를 반복 가능한 패턴으로 제외합니다. |
+| 엄격 비교 | `--strict`로 누락과 추가 파일을 모두 자동화 실패로 처리합니다. |
 
 ### 30초 데모
 
@@ -43,18 +48,24 @@ inbox/report-c.txt
 예기치 않은 파일:
 ```
 
+예제 비교는 누락 파일을 보여 주기 위해 의도적으로 종료 코드 `1`을 반환합니다.
+
 자동화에서는 같은 결과를 JSON으로 받을 수 있습니다.
 
 ```bash
 uv run doc-utils numbers examples/numbers.txt --json
 uv run doc-utils tree examples/documents --ignore '*.tmp' --json
+uv run python examples/verify_manifest.py
 ```
+
+입력부터 JSON 소비와 실패 처리까지 이어지는 예시는 [합성 파일 인수 검증 시나리오](docs/workflow-scenario.md)에서 확인할 수 있습니다.
 
 ## 🧭 설계 방향
 
 - **예측 가능한 결과:** 모든 목록을 결정적으로 정렬해 로컬·CI의 출력 차이를 줄였습니다.
 - **안전한 탐색:** 심볼릭 링크와 운영체제 메타데이터를 제외해 순환과 루트 이탈을 방지했습니다.
 - **자동화 친화성:** JSON 출력과 의미가 구분된 종료 코드로 셸·CI 파이프라인에 연결합니다.
+- **경로 경계:** 기대 목록은 정규화된 상대경로만 허용하고 절대경로와 상위 경로 참조를 거부합니다.
 - **작은 공급망:** 런타임 외부 의존성 없이 Python 표준 라이브러리만 사용합니다.
 - **공개 경계:** 독립 구현 원칙과 합성 데이터 정책을 문서로 남겨 포트폴리오의 출처를 설명합니다.
 
@@ -66,8 +77,8 @@ uv run doc-utils tree examples/documents --ignore '*.tmp' --json
 | Runtime | Python 표준 라이브러리, 외부 의존성 0개 |
 | Package Management | uv |
 | Build | Hatchling |
-| Testing & Quality | pytest, Ruff, GitHub Actions |
-| Interface | Python API, CLI (`doc-utils`), JSON |
+| Testing & Quality | pytest, pytest-cov, Ruff, GitHub Actions |
+| Interface | Python API, PEP 561 타입 정보, CLI (`doc-utils`), JSON 1.0 |
 
 ## 🔍 기술 선정 이유
 
@@ -75,8 +86,8 @@ uv run doc-utils tree examples/documents --ignore '*.tmp' --json
 | --- | --- | --- |
 | 실행 환경 | 표준 라이브러리 | 설치 비용과 공급망 노출을 줄이고 작은 CLI의 이식성을 높입니다. |
 | 패키지 관리 | uv | 잠금 파일을 바탕으로 개발·CI 환경을 빠르게 재현합니다. |
-| 품질 | pytest · Ruff | 경계 조건을 회귀 테스트하고 일관된 코드 품질을 검사합니다. |
-| 자동화 | GitHub Actions | Python 3.11–3.13에서 테스트·정적 검사·빌드를 반복 검증합니다. |
+| 품질 | pytest · pytest-cov · Ruff | 경계 조건을 회귀 테스트하고 90% 이상의 커버리지와 코드 품질을 검사합니다. |
+| 자동화 | GitHub Actions | Ubuntu·Windows에서 테스트하고 빌드한 wheel의 독립 설치까지 검증합니다. |
 
 세부 선택과 트레이드오프는 [설계 의사결정](docs/decisions.md)에 기록했습니다.
 
@@ -88,7 +99,9 @@ document-workflow-utils/
 ├── tests/                        # 합성 데이터 기반 회귀 테스트
 ├── examples/                     # 바로 실행 가능한 합성 입력과 디렉터리
 ├── docs/                         # 설계 결정과 출처 경계
+├── scripts/                      # 배포 wheel 독립 검증
 ├── .github/workflows/            # Python 버전별 자동 검증
+├── CHANGELOG.md                  # 정식 릴리스별 변경 기록
 └── pyproject.toml                # 패키지·품질 도구 설정
 ```
 
@@ -121,23 +134,25 @@ uv run doc-utils --version
 uv run doc-utils numbers examples/numbers.txt
 uv run doc-utils duplicates examples/names.txt --json
 uv run doc-utils compare examples/expected-files.txt examples/documents --ignore '*.tmp'
+uv run doc-utils compare examples/expected-files.txt examples/documents --strict --json
 uv run doc-utils tree examples/documents --mode emoji --ignore '*.tmp'
 ```
 
-`--ignore`는 `compare`와 `tree`에서 반복할 수 있습니다. `--json`은 모든 하위 명령에서 사용할 수 있습니다.
+`--ignore`는 `compare`와 `tree`에서 반복할 수 있습니다. `--json`은 모든 하위 명령에서 사용할 수 있으며, `--strict`는 추가 파일도 비교 실패로 처리합니다.
 
 | 종료 코드 | 의미 |
 | --- | --- |
-| `0` | 정상 처리. `compare`에서 추가 파일만 발견한 경우도 포함합니다. |
-| `1` | 유효한 정수가 없거나 기대 파일이 누락되었습니다. |
+| `0` | 정상 처리. 기본 `compare`에서 추가 파일만 발견한 경우도 포함합니다. |
+| `1` | 유효한 정수가 없거나 비교 정책상 파일 검증이 실패했습니다. |
 | `2` | 명령 사용 또는 입출력 오류입니다. |
 
 ### 4. 검증하기
 
 ```bash
 uv run pytest
-uv run ruff check src tests
+uv run ruff check src tests scripts examples
 uv build
+uv run --no-sync python scripts/verify_distribution.py dist
 ```
 
 ## 📚 문서
@@ -145,7 +160,10 @@ uv build
 | 문서 | 내용 |
 | --- | --- |
 | [설계 의사결정](docs/decisions.md) | 정렬·탐색·종료 코드·보안 경계의 선택 이유 |
+| [JSON 출력 계약](docs/json-contract.md) | 명령별 필드·타입·버전 및 종료 코드 계약 |
+| [합성 파일 인수 검증 시나리오](docs/workflow-scenario.md) | 입력부터 JSON 소비와 실패 처리까지 이어지는 예제 |
 | [출처 및 구현 경계](docs/provenance.md) | 독립 구현 원칙과 합성 데이터 정책 |
+| [변경 기록](CHANGELOG.md) | 정식 릴리스의 기능·호환성·검증 환경 |
 
 ## 🤝 협업 규칙
 
