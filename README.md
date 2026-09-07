@@ -1,13 +1,12 @@
 # document-workflow-utils
 
 [![CI](https://github.com/jaehunshin-git/document-workflow-utils/actions/workflows/ci.yml/badge.svg)](https://github.com/jaehunshin-git/document-workflow-utils/actions/workflows/ci.yml)
-[![Release](https://img.shields.io/github/v/release/jaehunshin-git/document-workflow-utils)](https://github.com/jaehunshin-git/document-workflow-utils/releases)
 [![Python](https://img.shields.io/badge/Python-3.11--3.13-3776AB?logo=python&logoColor=white)](https://www.python.org/)
 [![Coverage](https://img.shields.io/badge/coverage-%E2%89%A590%25-brightgreen)](pyproject.toml)
 
 > 흩어진 파일 목록의 누락·중복·구조를 한 번에 검증하는 무의존성 Python CLI
 
-회사생활에서 접한 반복적인 파일 검증 문제를 일반화해 개인적으로 다시 구현한 포트폴리오입니다. 사람이 눈으로 대조하던 숫자·파일명·디렉터리 구조 검사를 `doc-utils`라는 일관된 명령 체계로 묶고, 텍스트와 JSON 출력 및 명확한 종료 코드로 자동화에 연결할 수 있게 만들었습니다.
+회사 업무에서 반복적으로 발생하는 파일 검증 시간을 줄일 필요성을 느껴, 일반화한 요구사항을 바탕으로 개인적으로 다시 구현한 포트폴리오입니다. 사람이 눈으로 대조하던 숫자·파일명·디렉터리 구조 검사를 `doc-utils`라는 일관된 명령 체계로 묶고, 텍스트와 JSON 출력 및 명확한 종료 코드로 자동화에 연결할 수 있게 만들었습니다.
 
 이 저장소에는 외부 조직의 코드, 데이터, 로고와 내부 경로가 포함되어 있지 않습니다. 모든 예제와 테스트 데이터는 이 프로젝트를 위해 만든 합성 자료입니다.
 
@@ -101,7 +100,7 @@ document-workflow-utils/
 ├── docs/                         # 설계 결정과 출처 경계
 ├── scripts/                      # 배포 wheel 독립 검증
 ├── .github/workflows/            # Python 버전별 자동 검증
-├── CHANGELOG.md                  # 정식 릴리스별 변경 기록
+├── CHANGELOG.md                  # 주요 버전별 변경 기록
 └── pyproject.toml                # 패키지·품질 도구 설정
 ```
 
@@ -163,7 +162,7 @@ uv run --no-sync python scripts/verify_distribution.py dist
 | [JSON 출력 계약](docs/json-contract.md) | 명령별 필드·타입·버전 및 종료 코드 계약 |
 | [합성 파일 인수 검증 시나리오](docs/workflow-scenario.md) | 입력부터 JSON 소비와 실패 처리까지 이어지는 예제 |
 | [출처 및 구현 경계](docs/provenance.md) | 독립 구현 원칙과 합성 데이터 정책 |
-| [변경 기록](CHANGELOG.md) | 정식 릴리스의 기능·호환성·검증 환경 |
+| [변경 기록](CHANGELOG.md) | 주요 버전의 기능·호환성·검증 환경 |
 
 ## 🤝 협업 규칙
 
